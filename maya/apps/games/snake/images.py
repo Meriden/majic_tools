@@ -1,3 +1,6 @@
+from .utils import ALIGN_LEFT, ALIGN_RIGHT, ALIGN_V_CENTER, ALIGN_H_CENTER, ALIGN_TOP, ALIGN_BOTTOM
+
+
 class Image(object):
     def __init__(self, image_str=None):
         self.width = 0
@@ -19,51 +22,121 @@ class Image(object):
             self.lines.append(bin_str)
 
 
-    def getSubImage(self, offset_x, offset_y, width, height):
-        offset_x = min(max(offset_x, 0), self.width - 1)
-        offset_y = min(max(offset_y, 0), self.height - 1)
-        width = min(max(width, 1), self.width - offset_x)
-        height = min(max(height, 1), self.height - offset_y)
-
-        new_image = Image()
+    @classmethod
+    def create(cls, width, height):
+        new_image = cls()
         new_image.width = width
         new_image.height = height
-
-        offset = (1 << (self.width - width - offset_x))
-        mask = ((1 << width) - 1) * offset
-
-        for row in range(offset_y, height + offset_y):
-            new_image.lines.append((mask & self.lines[row]) / offset)
+        for _ in range(height):
+            new_image.lines.append(0)
 
         return new_image
 
 
-    def paint(self, painter, x, y, invert=False, paint_callback=None):
+    # def getSubImage(self, offset_x, offset_y, width, height):
+    #     offset_x = min(max(offset_x, 0), self.width - 1)
+    #     offset_y = min(max(offset_y, 0), self.height - 1)
+    #     width = min(max(width, 1), self.width - offset_x)
+    #     height = min(max(height, 1), self.height - offset_y)
+    #
+    #     new_image = Image()
+    #     new_image.width = width
+    #     new_image.height = height
+    #
+    #     offset = (1 << (self.width - width - offset_x))
+    #     mask = ((1 << width) - 1) * offset
+    #
+    #     for row in range(offset_y, height + offset_y):
+    #         new_image.lines.append((mask & self.lines[row]) / offset)
+    #
+    #     return new_image
+
+
+    def paint(self,
+              painter,
+              paint_area,
+              invert = False,
+              paint_callback = None,
+              alignment=0):
         """
         Paint the given image as pixels. Image defines lines of pixels that create an image.
 
         :param QPainter painter: the painter object for the widget
-        :param x: screen x position to start the image
-        :param y: screen y position to start the image
+        :param paint_area: x, y, width, height of paintable area
         :param invert: if True, switch which pixels to draw
         :param paint_callback: function to draw/paint the pixel
+        :param alignment: alignment of text image inside paint area
         """
         if not paint_callback:
             return
 
+        x, y, width, height = paint_area
+
+        offset = [0, 0, 0, 0]
+
+        # calculate width alignment
+        #
+        width_diff = width - self.width
+        if alignment & ALIGN_LEFT:
+            offset[2] = width_diff
+        elif alignment & ALIGN_RIGHT:
+            offset[0] = width_diff
+        else:
+            centered = width_diff / 2.0
+            offset[0] = int(centered)
+            offset[2] = width_diff - offset[0]
+
+        # calculate height alignment
+        #
+        height_diff = height - self.height
+        if alignment & ALIGN_TOP:
+            offset[3] = height_diff
+        elif alignment & ALIGN_BOTTOM:
+            offset[1] = height_diff
+        else:
+            centered = height_diff / 2.0
+            offset[3] = int(centered)
+            offset[1] = height_diff - offset[3]
+
+        # fill in remaining area
+        #
+        if invert:
+            for i in range(offset[1]):
+                for j in range(width):
+                    paint_callback(painter, x + j, y + i)
+
+            for i in range(offset[3]):
+                for j in range(width):
+                    paint_callback(painter, x + j, y + i + offset[1] + self.height)
+
+            for i in range(offset[1], height - offset[3]):
+                for j in range(offset[0]):
+                    paint_callback(painter, x + j, y + i)
+                for j in range(offset[2]):
+                    paint_callback(painter, x + j + offset[0] + self.width, y + i)
+
         for i in range(self.height):
             line = self.lines[i]
             check = 1 << (self.width - 1)
+
             for j in range(self.width):
                 paint = bool(line & check)
+
                 if invert:
                     paint = not paint
+
                 if paint:
-                    px = x + j
-                    py = y + i
-                    paint_callback(painter, px, py)
+                    paint_callback(painter, x + j + offset[0], y + i + offset[1])
 
                 check >>= 1
+
+
+    def __add__(self, image):
+        new_image = Image()
+        new_image.width = self.width + image.width
+        new_image.height = self.height + image.height
+
+
 
 
 TITLE_IMAGE = '800c00000000000000c00007-801e00000004030001e000f9-807e0000f01c070087e00f81-80fe0381f07e1f01cff1f801-81'\

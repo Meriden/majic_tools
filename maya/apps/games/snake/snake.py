@@ -7,6 +7,7 @@ import PySide2.QtWidgets as qw
 from majic_tools.maya.apps.games.snake import game; reload(game)
 from majic_tools.maya.apps.games.snake import images; reload(images)
 from majic_tools.maya.apps.games.snake import font; reload(font)
+from .utils import ALIGN_LEFT, ALIGN_RIGHT, ALIGN_V_CENTER, ALIGN_H_CENTER, ALIGN_TOP, ALIGN_BOTTOM
 
 # ------------------------------------------------------------------------------------------------ #
 
@@ -66,6 +67,8 @@ class SnakeData(game.GameData):
     bonus_countdown_speed = 100
     bonus_countdown = 20
 
+    scores = [(0, '---') for _ in range(10)]
+
 # ------------------------------------------------------------------------------------------------ #
 
 class Snake(game.Game):
@@ -79,7 +82,7 @@ class Snake(game.Game):
         start_screen = self.addLevel(Splash)
         main_menu = self.addLevel(Menu, 'Menu')
         level_menu = self.addLevel(LevelMenu, 'Level')
-        #high_scores = self.addLevel(HighScores)
+        high_scores = self.addLevel(HighScores)
         arena = self.addLevel(Arena)
 
         # connect levels together
@@ -94,11 +97,11 @@ class Snake(game.Game):
         #
         menu_to_arena = self.addConnection(main_menu, arena)
         menu_to_level = self.addConnection(main_menu, level_menu)
-        #menu_to_scores = self.addConnection(main_menu, high_scores)
+        menu_to_scores = self.addConnection(main_menu, high_scores)
 
         menu_items = [('New Game', menu_to_arena),
                       ('Level', menu_to_level),
-                      ('High Scores', menu_to_level),
+                      ('High Scores', menu_to_scores),
                       ('Mode', menu_to_level),
                       ('Test 1', menu_to_level),
                       ('Test 2', menu_to_level),
@@ -120,6 +123,10 @@ class Snake(game.Game):
         # setup arena
         #
         self.addConnection(arena, main_menu)
+
+        # setup high score board
+        #
+        self.addConnection(high_scores, main_menu)
         
 # ------------------------------------------------------------------------------------------------ #
 
@@ -151,15 +158,13 @@ class Splash(game.Level):
     def __init__(self, data):
         super(Splash, self).__init__(data)
         self.image = None
-        self.offset = (0, 0)
+        self.offset = [0, 0]
+        self.alignment = ALIGN_H_CENTER | ALIGN_V_CENTER
 
 
-    def initialize(self, image):
+    def initialize(self, image, alignment=0):
         self.image = image
-
-        x_offset = (self.data.screen_width - self.image.width) / 2
-        y_offset = (self.data.screen_height - self.image.height) / 2
-        self.offset = (x_offset, y_offset)
+        self.alignment = alignment
 
     
     def paintEvent(self, _):
@@ -167,13 +172,10 @@ class Splash(game.Level):
             return
 
         painter = qw.QStylePainter(self)
-        option = qw.QStyleOption()
-        option.initFrom(self)
-     
-        x = option.rect.x() + self.offset[0]
-        y = option.rect.y() + self.offset[1]
 
-        self.image.paint(painter, x, y, False, paintPixel)
+        paint_area = [0, 0, self.data.screen_width, self.data.screen_height]
+
+        self.image.paint(painter, paint_area, False, paintPixel, self.alignment)
 
 
     def keyPressEvent(self, _):
@@ -187,31 +189,49 @@ class ScrollArea(game.Level):
 
         self.title = title
         self.title_image = None
+        self.scrollbar = False
 
-        self.item_width = self.data.screen_width - 4
         self.items = []
         self.item_positions = {}
 
         self.setTitle(title)
 
+        self.margins = [2, 0, 2, 2]
+
+        self.scroll_area = [0, 0, 0, 0]
+        self.scroll_area[0] = self.margins[0]
+        self.scroll_area[1] = self.title_image.height + 2 + self.margins[1]
+        self.scroll_area[2] = self.data.screen_width - self.margins[0] - self.margins[2]
+        self.scroll_area[3] = self.data.screen_height - self.scroll_area[1] - self.margins[3]
+
         self.selected_item_index = 0
-        self.scroll_range = [0, 0, 0, []]
-        self.scroll_range[0] = self.data.screen_height - self.title_image.height - 5
-        self.scroll_range[2] = self.scroll_range[0]
+        self.scroll_range = [0, self.scroll_area[3], []]
 
 
     def setTitle(self, title):
         self.title = title
-        self.title_image = font.small_font.getImage('- {} -'.format(title),
-                                                    width=self.data.screen_width,
-                                                    alignment=font.Font.ALIGN_CENTER)
+        self.title_image = font.small_font.getImage('- {} -'.format(title))
         self.repaint()
 
 
-    def addItem(self, item):
-        new_index = len(self.items)
-        self.items.append(item)
-        self.item_positions[new_index] = self.item_positions[new_index - 1] + item.height
+    def initialize(self, items):
+        self.items = items
+        self.item_positions = {}
+
+        self.scroll_range = [0, self.scroll_area[3], []]
+        self.selected_item_index = 0
+
+        scroll_value = 0
+        for i, item in enumerate(self.items):
+            scroll_value += item.height
+            self.item_positions[i] = scroll_value
+
+        if max(self.item_positions.values()) > self.scroll_area[3]:
+            self.scrollbar = True
+            self.scroll_area[2] -= 4
+
+        # update scroll area
+        #
         self._scroll()
 
 
@@ -248,31 +268,30 @@ class ScrollArea(game.Level):
 
     def _scroll(self):
         """ Handles menu scrolling area, which items are visible and partial items."""
-
         selected_lower = self.item_positions.get(self.selected_item_index - 1, 0)
-        selected_upper = self.item_positions[self.selected_item_index]
+        selected_upper = self.item_positions[self.selected_item_index] - 1
 
-        if selected_lower <= self.scroll_range[1]:
-            self.scroll_range[1] = selected_lower
-            self.scroll_range[2] = selected_lower + self.scroll_range[0]
-        elif selected_upper > self.scroll_range[2]:
-            self.scroll_range[2] = selected_upper
-            self.scroll_range[1] = selected_upper - self.scroll_range[0]
+        if selected_lower <= self.scroll_range[0]:
+            self.scroll_range[0] = selected_lower
+            self.scroll_range[1] = selected_lower + self.scroll_area[3]
+        elif selected_upper > self.scroll_range[1]:
+            self.scroll_range[1] = selected_upper
+            self.scroll_range[0] = selected_upper - self.scroll_area[3] + 1
 
         # figure out which items are currently visible
         #
-        visible_items = self.scroll_range[3] = []
+        visible_items = self.scroll_range[2] = []
 
         previous_scroll_value = 0
         for i, item in enumerate(self.items):
-            scroll_value = self.item_positions[i]
+            scroll_value = self.item_positions[i] - 1
 
             # check if lower or upper edge is in menu range
             #
             lower = upper = False
-            if self.scroll_range[1] <= previous_scroll_value < self.scroll_range[2]:
+            if self.scroll_range[0] <= previous_scroll_value <= self.scroll_range[1]:
                 lower = True
-            if self.scroll_range[1] < scroll_value <= self.scroll_range[2]:
+            if self.scroll_range[0] <= scroll_value <= self.scroll_range[1]:
                 upper = True
 
             # based on visible edges add to visible menu items
@@ -280,59 +299,108 @@ class ScrollArea(game.Level):
             if lower and upper:
                 visible_items.append((i, None, None))
             elif lower:
-                value = self.scroll_range[2] - previous_scroll_value
+                value = self.scroll_range[1] - previous_scroll_value
                 if value == 0:
                     continue
                 visible_items.append((i, 0, value))
             elif upper:
-                value = scroll_value - self.scroll_range[1] + 2
-                visible_items.append((i, value, item.image.height))
+                value = scroll_value - self.scroll_range[0]
+                visible_items.append((i, item.height - value, item.height))
 
-            previous_scroll_value = scroll_value
+            previous_scroll_value = scroll_value + 1
 
 
     def paintEvent(self, _):
         painter = qw.QStylePainter(self)
-        option = qw.QStyleOption()
-        option.initFrom(self)
 
-        self.title_image.paint(painter, 0, 2, False, paintPixel)
-        x = option.rect.x() + 2
-        y = option.rect.y() + 3 + self.title_image.height
+        title_area = (0, 0, self.data.screen_width, 10)
+        self.title_image.paint(painter, title_area, False, paintPixel)
+
+        x, y = self.scroll_area[0], self.scroll_area[1]
+
+        # draw scroll bar
+        #
+        if self.scrollbar:
+            scroll_height = self.scroll_area[3]
+
+            scroll_incr = float(scroll_height) / len(self.items)
+            start_scroll = round(scroll_incr * self.selected_item_index)
+            end_scroll = round(scroll_incr * (self.selected_item_index + 1))
+            end_scroll = min([end_scroll, scroll_height - 1])
+
+            scroll_bar_offset = self.data.screen_width - self.margins[2]
+            for i in range(scroll_height):
+                if i in (start_scroll, end_scroll):
+                    paintPixel(painter, scroll_bar_offset - 2, i + y)
+
+                if start_scroll < i < end_scroll:
+                    paintPixel(painter, scroll_bar_offset - 1, i + y)
+                else:
+                    paintPixel(painter, scroll_bar_offset - 3, i + y)
 
         # draw menu items
         #
-        for item_index, lower, upper in self.scroll_range[3]:
+        for item_index, lower, upper in self.scroll_range[2]:
             invert = False
             if item_index == self.selected_item_index:
                 invert = True
 
             item = self.items[item_index]
 
-            # get image
+            # get item height. some items might be partially visible
             #
-            image = item.image
-            if lower is not None:
-                image = item.image.getSubImage(0, lower, item.image.width, upper - lower)
+            item_height = (upper - lower) if lower is not None else item.height
 
-            # paint either full or partial menu item image
+            # create paint area, start x, y and width, height
             #
-            image.paint(painter, x, y, invert, paintPixel)
-            y += image.height
+            paint_area = (x, y, self.scroll_area[2], item_height)
+
+            # paint menu item in allowed paint area
+            #
+            item.paint(painter, paint_area, invert)
+
+            y += item_height
 
 
 class MenuItem(object):
-    def __init__(self, text, width, height):
+    def __init__(self, text):
         self.text = text
-        self.image = font.main_font.getImage(text,
-                                             width = width,
-                                             height = height,
-                                             alignment = font.Font.ALIGN_LEFT)
+        self.height = 18
+        self.image = font.main_font.getImage(text)
+        self.margins = [3, 3, 3, 3]
+
+
+    def paint(self, painter, paint_area, invert=False):
+        sub_paint_area = [paint_area[0] + self.margins[0],
+                          paint_area[1] + self.margins[1],
+                          paint_area[2] - self.margins[0] - self.margins[2],
+                          paint_area[3] - self.margins[3] - self.margins[1]]
+
+        if invert:
+            x, y = paint_area[0:2]
+
+            for i in range(paint_area[2]):
+                for j in range(self.margins[1]):
+                    paintPixel(painter, x + i, y + j)
+
+                base_y = y + paint_area[3] - self.margins[3]
+                for j in range(self.margins[3]):
+                    paintPixel(painter, x + i, base_y + j)
+
+            for j in range(self.margins[1], sub_paint_area[3] + self.margins[1]):
+                for i in range(self.margins[0]):
+                    paintPixel(painter, x + i, y + j)
+
+                for i in range(1, self.margins[0] + 1):
+                    paintPixel(painter, x + paint_area[2] - i, y + j)
+
+        self.image.paint(painter, sub_paint_area, invert, paintPixel, ALIGN_LEFT)
 
 
 class Menu(ScrollArea):
     def __init__(self, data, title='Untitled'):
         super(Menu, self).__init__(data, title)
+
         self.signals = []
 
 
@@ -343,32 +411,14 @@ class Menu(ScrollArea):
         :param list menu_items: list of menu items to display
         :return:
         """
-        self.items = []
+        items = []
         self.signals = []
-        self.item_positions = {}
 
-        self.scroll_range = [0, 0, 0, []]
-        self.scroll_range[0] = self.data.screen_height - self.title_image.height - 5
-        self.scroll_range[2] = self.scroll_range[0]
-        self.selected_item_index = 0
-
-        # add each menu item to menu as fancy text
-        #
         for menu_item_name, signal_id in menu_items:
-            new_item = MenuItem(menu_item_name, self.item_width, 16)
-            self.items.append(new_item)
+            items.append(MenuItem(menu_item_name))
             self.signals.append(signal_id)
 
-        # store heights for quick reference while scrolling
-        #
-        scroll_value = 0
-        for i, item in enumerate(self.items):
-            scroll_value += item.image.height
-            self.item_positions[i] = scroll_value
-
-        # update scroll area
-        #
-        self._scroll()
+        super(Menu, self).initialize(items)
 
 
     def select(self, selected_item_index):
@@ -432,9 +482,9 @@ class Arena(game.Level):
 
         # create game over text
         #
-        self.game_over_image = font.main_font.getImage('Game over!', width=102, height=17)
-        self.your_score_image = font.main_font.getImage('Your score:', width=102, height=17)
-        self.score_image = font.main_font.getImage('0000', width=102, height=17)
+        self.game_over_image = font.main_font.getImage('Game over!')
+        self.your_score_image = font.main_font.getImage('Your score:')
+        self.score_image = font.main_font.getImage('0000')
 
     
     def reset(self):
@@ -506,7 +556,7 @@ class Arena(game.Level):
         self.score_board.hide()
         self.bonus_countdown.hide()
 
-        self.score_image = font.main_font.getImage(self.score_board.asString(), 102, 17)
+        self.score_image = font.main_font.getImage(self.score_board.asString())
 
         self.repaint()
 
@@ -543,10 +593,12 @@ class Arena(game.Level):
                 paintPixel(painter, right_edge, i)
 
         else:
-            x, y = 0, 10
-            self.game_over_image.paint(painter, x, y, False, paintPixel)
-            self.your_score_image.paint(painter, x, y + 17, False, paintPixel)
-            self.score_image.paint(painter, x, y + 34, False, paintPixel)
+            paint_area = [0, 15, SnakeData.screen_width, 20]
+            self.game_over_image.paint(painter, paint_area, False, paintPixel)
+            paint_area[1] += 20
+            self.your_score_image.paint(painter, paint_area, False, paintPixel)
+            paint_area[1] += 12
+            self.score_image.paint(painter, paint_area, False, paintPixel)
 
 
     @qc.Slot()
@@ -1062,6 +1114,143 @@ class Block(object):
 
         return Block.DRAW[self.type][direction]
 
+#--------------------------------------------------------------------------------------------------#
+
+class HighScores(ScrollArea):
+    def __init__(self, data):
+        super(HighScores, self).__init__(data, 'High Scores')
+
+        self.initialize(SnakeData.scores)
+
+
+    def initialize(self, scores):
+        """ Setup the menu with given items and signal connections. Should be pairs of
+         text:signal_id.
+
+        :param list menu_items: list of menu items to display
+        :return:
+        """
+        items = []
+        for position, (score, name) in enumerate(scores):
+            items.append(HighScoreItem(position, name, score))
+
+        return super(HighScores, self).initialize(items)
+
+
+    def isHighScore(self, score):
+        return score > min(self.scores)
+
+
+    def scores(self):
+        return [item.score for item in self.items]
+
+
+    def select(self, selected_item_index):
+        """Returns to main menu."""
+        self.switch(0)
+
+
+class HighScoreItem(object):
+    score_positions = ('1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th')
+
+    def __init__(self, position, name, score):
+        self.images = [None, None, None]
+        self.height = 12
+
+        self._name = None
+        self._position = None
+        self._score = None
+        self._edit_mode = False
+
+        self.position = position
+        self.name = name
+        self.score = score
+
+
+    @property
+    def name(self):
+        return self._name
+
+
+    @name.setter
+    def name(self, name):
+        name = str(name)
+        if len(name) > 3:
+            name = name[0:3]
+        else:
+            for _ in range(len(name), 3):
+                name += 'A'
+
+        self._name = name.upper()
+
+        self.images[2] = font.small_font.getImage(self.name)
+
+
+
+    @property
+    def score(self):
+        return self._score
+
+
+    @score.setter
+    def score(self, score):
+        self._score = int(score)
+        self.images[1] = font.small_font.getImage('{:04d}'.format(self.score))
+
+
+    @property
+    def positions(self):
+        return self._position
+
+
+    @positions.setter
+    def position(self, position):
+        self._position = min(max(0, int(position)), 10)
+        self.images[0] = font.small_font.getImage(HighScoreItem.score_positions[self.position-1])
+
+
+    def paint(self, painter, paint_area, invert=False):
+        column_width = int(paint_area[2] / 3.0)
+        sub_paint_area = [paint_area[0], paint_area[1], column_width, paint_area[3]]
+
+        for i, image in enumerate(self.images):
+            image.paint(painter, sub_paint_area, invert, paintPixel)
+            sub_paint_area[0] += column_width
+
+    #     self.edit_index = 0
+    #
+    # def edit(self):
+    #     pass
+    #
+    #
+    # def keyPressEvent(self, event):
+    #     if not self.edit_mode:
+    #         return
+    #
+    #     key = event.key()
+    #     if key == qc.Qt.Key_Left:
+    #         self.grid.moveLeft()
+    #     elif key == qc.Qt.Key_Right:
+    #         self.grid.moveRight()
+    #     elif key == qc.Qt.Key_Up:
+    #         self.grid.moveUp()
+    #     elif key == qc.Qt.Key_Down:
+    #         self.grid.moveDown()
+    #     elif key in (qc.Qt.Key_Return, qc.Qt.Key_Enter) and not self.game_mode:
+    #         self.switch(0)
+    #
+    #
+    # def scrollUp(self):
+    #     pass
+    #
+    #
+    # def scrollDown(self):
+    #     pass
+    #
+    #
+    # def select(self):
+    #     pass
+
 # ------------------------------------------------------------------------------------------------ #
 
 ui = None
@@ -1098,53 +1287,4 @@ def draw(image):
             check = check << 1
         image_str.append(''.join(line_str)[::-1])
     print '\n'.join(image_str)
-
-#--------------------------------------------------------------------------------------------------#
-
-class HighScores(Menu):
-    def __init__(self, data):
-        super(HighScores, self).__init__(data, 'High Scores')
-
-        self.initialize(['MIK   0020', 'DAV   0234'])
-
-
-class HighScoreLine(qw.QWidget):
-    def __init__(self, name='AAA', score=0):
-        super(HighScoreLine, self).__init__()
-        self.name = name
-        self.score = score
-        self.edit_mode = False
-        self.edit_index = 0
-
-    def edit(self):
-        pass
-
-
-    def keyPressEvent(self, event):
-        if not self.edit_mode:
-            return
-
-        key = event.key()
-        if key == qc.Qt.Key_Left:
-            self.grid.moveLeft()
-        elif key == qc.Qt.Key_Right:
-            self.grid.moveRight()
-        elif key == qc.Qt.Key_Up:
-            self.grid.moveUp()
-        elif key == qc.Qt.Key_Down:
-            self.grid.moveDown()
-        elif key in (qc.Qt.Key_Return, qc.Qt.Key_Enter) and not self.game_mode:
-            self.switch(0)
-
-
-    def scrollUp(self):
-        pass
-
-
-    def scrollDown(self):
-        pass
-
-
-    def select(self):
-        pass
 

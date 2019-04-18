@@ -1,10 +1,7 @@
 from majic_tools.maya.apps.games.snake.images import Image
 
-class Font(object):
-    ALIGN_LEFT = 1
-    ALIGN_CENTER = 2
-    ALIGN_RIGHT = 3
 
+class Font(object):
     def __init__(self, data, height):
         self.height = height
 
@@ -17,7 +14,7 @@ class Font(object):
             self._data[letter] = [bin_str[i * width:(i + 1) * width] for i in range(height)]
 
 
-    def getImage(self, text, width=None, height=None, alignment=None):
+    def getImage(self, text):
         # compose new gris from text
         #
         grid = ['' for _ in range(self.height)]
@@ -40,57 +37,12 @@ class Font(object):
                 if letter_index != len(text)-1:
                     grid[i] += '0'
 
-        # modify grid to match specified height
-        #
-        base_offset = 0
-        if isinstance(height, int):
-            if height < self.height:
-                grid = grid[:height]
-
-            else:
-                top_offset = base_offset = (height - self.height) / 2
-                if (top_offset + base_offset + self.height) != height:
-                    top_offset += 1
-
-                for _ in range(top_offset):
-                    grid.insert(0, '0')
-                for _ in range(base_offset):
-                    grid.append('0')
-        else:
-            height = self.height
-
-        # modify grid to match specified width with given alignment
-        #
-        if isinstance(width, int):
-            grid_width = max([len(row) for row in grid])
-            if width < grid_width:
-                for i, row in enumerate(grid):
-                    grid[i] = row[:width]
-            else:
-                left_offset = right_offset = (width - grid_width) / 2
-                if grid_width + left_offset + right_offset < width:
-                    right_offset += 1
-
-                if grid_width + (2 * base_offset) > width:
-                    pass
-
-                elif alignment == self.ALIGN_LEFT:
-                    left_offset = base_offset
-                    right_offset = width - (grid_width + left_offset)
-
-                elif alignment == self.ALIGN_RIGHT:
-                    right_offset = base_offset
-                    left_offset = width - (grid_width + right_offset)
-
-                for i, row in enumerate(grid):
-                    grid[i] = ('0' * left_offset) + row + ('0' * right_offset)
-
         # create image
         #
         new_image = Image()
         new_image.lines = [int(i, 2) for i in grid]
         new_image.width = max([len(row) for row in grid])
-        new_image.height = height
+        new_image.height = self.height
 
         return new_image
 
