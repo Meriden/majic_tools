@@ -4,7 +4,9 @@ import PySide2.QtCore as qc
 import PySide2.QtGui as qg
 import PySide2.QtWidgets as qw
 
-from majic_tools.maya.apps.games.snake import game; reload(game)
+from majic_tools.sys.utils.names import intToAlpha
+
+from . import game; reload(game)
 from majic_tools.maya.apps.games.snake import images; reload(images)
 from majic_tools.maya.apps.games.snake import font; reload(font)
 from .utils import ALIGN_LEFT, ALIGN_RIGHT, ALIGN_V_CENTER, ALIGN_H_CENTER, ALIGN_TOP, ALIGN_BOTTOM
@@ -67,7 +69,15 @@ class SnakeData(game.GameData):
     bonus_countdown_speed = 100
     bonus_countdown = 20
 
-    scores = [(0, '---') for _ in range(10)]
+    # high scores
+    #
+    scores = [(intToAlpha(i, capital=True) * 3, 100 - (i * 10)) for i in range(10)]
+    new_high_score = None
+
+    @staticmethod
+    def isHighScore(score):
+        """Checks if given score is higher than the lowest recorded score."""
+        return score > min([score for _, score in SnakeData.scores])
 
 # ------------------------------------------------------------------------------------------------ #
 
@@ -123,6 +133,7 @@ class Snake(game.Game):
         # setup arena
         #
         self.addConnection(arena, main_menu)
+        self.addConnection(arena, high_scores)
 
         # setup high score board
         #
@@ -263,7 +274,8 @@ class ScrollArea(game.Level):
 
     def select(self, selected_item_index):
         """Base function for selecting an item Override in inherited classes."""
-        pass
+        self.selected_item_index = selected_item_index
+        self._scroll()
 
 
     def _scroll(self):
@@ -457,6 +469,7 @@ class Arena(game.Level):
 
         self.game_mode = True
         self.running = False
+        self._high_score = False
 
         # create and connect timers
         #
@@ -484,6 +497,7 @@ class Arena(game.Level):
         #
         self.game_over_image = font.main_font.getImage('Game over!')
         self.your_score_image = font.main_font.getImage('Your score:')
+        self.high_score_image = font.main_font.getImage('NEW HIGH SCORE!')
         self.score_image = font.main_font.getImage('0000')
 
     
@@ -493,6 +507,7 @@ class Arena(game.Level):
         
         self.game_mode = True
         self.running = True
+        self._high_score = False
 
         self.score_board.reset()
         self.bonus_countdown.reset()
@@ -512,8 +527,13 @@ class Arena(game.Level):
             self.grid.moveUp()
         elif key == qc.Qt.Key_Down:
             self.grid.moveDown()
+
+        # pause or exit
         elif key in (qc.Qt.Key_Return, qc.Qt.Key_Enter) and not self.game_mode:
-            self.switch(0)
+            if self.data.new_high_score:
+                self.switch(1)
+            else:
+                self.switch(0)
         
     
     def start(self):
@@ -552,10 +572,20 @@ class Arena(game.Level):
 
         self.game_mode = False
 
+        # check for new high score
+        #
+        score = self.score_board.score_counter
+        if self.data.isHighScore(score):
+            self.data.new_high_score = score
+
+        # hide other arena widgets
+        #
         self.grid.hide()
         self.score_board.hide()
         self.bonus_countdown.hide()
 
+        # create score image
+        #
         self.score_image = font.main_font.getImage(self.score_board.asString())
 
         self.repaint()
@@ -593,10 +623,13 @@ class Arena(game.Level):
                 paintPixel(painter, right_edge, i)
 
         else:
-            paint_area = [0, 15, SnakeData.screen_width, 20]
+            paint_area = [0, 15, self.data.screen_width, 20]
             self.game_over_image.paint(painter, paint_area, False, paintPixel)
             paint_area[1] += 20
-            self.your_score_image.paint(painter, paint_area, False, paintPixel)
+            if self.data.new_high_score:
+                self.high_score_image.paint(painter, paint_area, False, paintPixel)
+            else:
+                self.your_score_image.paint(painter, paint_area, False, paintPixel)
             paint_area[1] += 12
             self.score_image.paint(painter, paint_area, False, paintPixel)
 
@@ -1120,29 +1153,27 @@ class HighScores(ScrollArea):
     def __init__(self, data):
         super(HighScores, self).__init__(data, 'High Scores')
 
-        self.initialize(SnakeData.scores)
+        self.initialize()
+
+        self._edit_mode = False
+
+        self._edit_timer = qc.QTimer()
+        self._edit_timer.timeout.connect(self._toggleEdit)
+
+        self._edit_item = None
+        self._edit_index = 0
+        self._edit_indices = [0, None, None]
 
 
-    def initialize(self, scores):
+    def initialize(self):
         """ Setup the menu with given items and signal connections. Should be pairs of
          text:signal_id.
-
-        :param list menu_items: list of menu items to display
-        :return:
         """
         items = []
-        for position, (score, name) in enumerate(scores):
+        for position, (name, score) in enumerate(self.data.scores):
             items.append(HighScoreItem(position, name, score))
 
         return super(HighScores, self).initialize(items)
-
-
-    def isHighScore(self, score):
-        return score > min(self.scores)
-
-
-    def scores(self):
-        return [item.score for item in self.items]
 
 
     def select(self, selected_item_index):
@@ -1150,8 +1181,131 @@ class HighScores(ScrollArea):
         self.switch(0)
 
 
+    def start(self):
+        super(ScrollArea, self).start()
+
+        if not self.data.new_high_score:
+            return
+
+        position = -1
+        for i, (_, score) in enumerate(self.data.scores):
+            if self.data.new_high_score > score:
+                position = i
+                break
+
+        if position == -1:
+            return
+
+        # select score item
+        #
+        self.selected_item_index = position
+        self._scroll()
+
+        # insert new score
+        #
+        self.data.scores.insert(position, ('---', self.data.new_high_score))
+        self.data.scores = self.data.scores[:-1]
+
+        for i, (name, score) in enumerate(self.data.scores):
+            self.items[i].score = score
+            self.items[i].name = name
+
+        self.data.new_high_score = None
+
+        # start edit mode
+        #
+        self._edit_item = self.items[position]
+        self.start_edit()
+
+
+    def keyPressEvent(self, event):
+        """ Handles scrolling and selection of menu items.
+
+        :param QEvent event: key press event
+        :return:
+        """
+        if self._edit_mode:
+            key = event.key()
+            if key in (qc.Qt.Key_Up, qc.Qt.Key_Down):
+                if key == qc.Qt.Key_Up:
+                    self.scroll_edit(1)
+                elif key == qc.Qt.Key_Down:
+                    self.scroll_edit(-1)
+            elif key in (qc.Qt.Key_Return, qc.Qt.Key_Enter):
+                self.next_edit()
+
+            self.repaint()
+            return
+
+        super(HighScores, self).keyPressEvent(event)
+
+    @qc.Slot()
+    def _toggleEdit(self):
+        if not self._edit_item:
+            return
+
+        self._edit_item._edit_paint = not self._edit_item._edit_paint
+        self.repaint()
+
+
+    def start_edit(self):
+        self._edit_mode = True
+        self._edit_timer.start(300)
+
+        self._edit_index = 0
+        self._edit_indices = [0, None, None]
+
+        self._updateName()
+
+
+    def scroll_edit(self, scroll):
+        self._edit_indices[self._edit_index] += scroll
+
+        current_value = self._edit_indices[self._edit_index]
+        if  current_value >= 26:
+            self._edit_indices[self._edit_index] -= 26
+        elif current_value < 0:
+            self._edit_indices[self._edit_index] += 26
+
+        self._updateName()
+
+
+    def next_edit(self):
+        self._edit_index += 1
+        if self._edit_index == 3:
+            self.end_edit()
+            return
+
+        self._edit_indices[self._edit_index] = self._edit_indices[self._edit_index-1]
+        self._updateName()
+
+
+    def end_edit(self):
+        self.data.scores[self.selected_item_index] = (self._edit_item.name, self._edit_item.score)
+
+        self._edit_item._edit_paint = False
+        self._edit_item = None
+        self._edit_mode = False
+        self._edit_timer.stop()
+
+
+    def _updateName(self):
+        name = ''
+        for i in self._edit_indices:
+            if i is None:
+                name += '-'
+            else:
+                name += intToAlpha(i, capital=True)
+
+        self._edit_item.name = name
+        self.repaint()
+
+
 class HighScoreItem(object):
     score_positions = ('1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th')
+
+    blank_image = font.small_font.getImage('   ')
+
 
     def __init__(self, position, name, score):
         self.images = [None, None, None]
@@ -1160,7 +1314,7 @@ class HighScoreItem(object):
         self._name = None
         self._position = None
         self._score = None
-        self._edit_mode = False
+        self._edit_paint = False
 
         self.position = position
         self.name = name
@@ -1186,7 +1340,6 @@ class HighScoreItem(object):
         self.images[2] = font.small_font.getImage(self.name)
 
 
-
     @property
     def score(self):
         return self._score
@@ -1206,7 +1359,7 @@ class HighScoreItem(object):
     @positions.setter
     def position(self, position):
         self._position = min(max(0, int(position)), 10)
-        self.images[0] = font.small_font.getImage(HighScoreItem.score_positions[self.position-1])
+        self.images[0] = font.small_font.getImage(HighScoreItem.score_positions[self.position])
 
 
     def paint(self, painter, paint_area, invert=False):
@@ -1214,42 +1367,12 @@ class HighScoreItem(object):
         sub_paint_area = [paint_area[0], paint_area[1], column_width, paint_area[3]]
 
         for i, image in enumerate(self.images):
+            if i == 2 and self._edit_paint:
+                HighScoreItem.blank_image.paint(painter, sub_paint_area, invert, paintPixel)
+                continue
+
             image.paint(painter, sub_paint_area, invert, paintPixel)
             sub_paint_area[0] += column_width
-
-    #     self.edit_index = 0
-    #
-    # def edit(self):
-    #     pass
-    #
-    #
-    # def keyPressEvent(self, event):
-    #     if not self.edit_mode:
-    #         return
-    #
-    #     key = event.key()
-    #     if key == qc.Qt.Key_Left:
-    #         self.grid.moveLeft()
-    #     elif key == qc.Qt.Key_Right:
-    #         self.grid.moveRight()
-    #     elif key == qc.Qt.Key_Up:
-    #         self.grid.moveUp()
-    #     elif key == qc.Qt.Key_Down:
-    #         self.grid.moveDown()
-    #     elif key in (qc.Qt.Key_Return, qc.Qt.Key_Enter) and not self.game_mode:
-    #         self.switch(0)
-    #
-    #
-    # def scrollUp(self):
-    #     pass
-    #
-    #
-    # def scrollDown(self):
-    #     pass
-    #
-    #
-    # def select(self):
-    #     pass
 
 # ------------------------------------------------------------------------------------------------ #
 

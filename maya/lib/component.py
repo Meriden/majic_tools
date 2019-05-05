@@ -1,61 +1,48 @@
+import maya.cmds as mc
 
-class ComponentData(dict):
-    def __init__(self):
-        pass
+    
+def undo(func):
+    def wrapper(*args, **kwargs):
+        mc.undoInfo(openChunk=True)
+        try:
+            ret = func(*args, **kwargs)
+        finally:
+            mc.undoInfo(closeChunk=True)
+        return ret
+    return wrapper
 
-
-    def save(self):
-        pass
-
-
-    def load(self):
-        pass
-
+#--------------------------------------------------------------------------------------------------#
 
 class ComponentError(Exception):
     pass
 
 
-class Component(object):
-    DATA = ComponentData
-
+class Component(object): 
+    
     def __init__(self, name=None):
         self.name = str(name)
-        self._data = None
 
+    
+    def create(self):
+        raise NotImplementedError
+    
+    
+    def createFromData(self):
+        raise NotImplementedError
 
+    #------------------------------------------------------------------------------------------#
+
+    
     @staticmethod
     def isComponent(name):
         raise NotImplementedError
-
-
-    @classmethod
-    def create(cls):
-        raise NotImplementedError
-
-
-    @classmethod
-    def createFromData(cls):
-        raise NotImplementedError
-
-
-    def data(self):
-        if self._data is None:
-            self._data =
-
-
-    def _syncData(self):
-        pass
-
-
-    def _syncScene(self):
-        pass
-
-
+    
+    #------------------------------------------------------------------------------------------#
+    
     def __str__(self):
         return self.name
-
-
+    
+    
     def __repr__(self):
         return "<{} '{}'>".format(self.__class__.__name__, self.name)
 

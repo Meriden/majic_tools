@@ -33,25 +33,6 @@ class Image(object):
         return new_image
 
 
-    # def getSubImage(self, offset_x, offset_y, width, height):
-    #     offset_x = min(max(offset_x, 0), self.width - 1)
-    #     offset_y = min(max(offset_y, 0), self.height - 1)
-    #     width = min(max(width, 1), self.width - offset_x)
-    #     height = min(max(height, 1), self.height - offset_y)
-    #
-    #     new_image = Image()
-    #     new_image.width = width
-    #     new_image.height = height
-    #
-    #     offset = (1 << (self.width - width - offset_x))
-    #     mask = ((1 << width) - 1) * offset
-    #
-    #     for row in range(offset_y, height + offset_y):
-    #         new_image.lines.append((mask & self.lines[row]) / offset)
-    #
-    #     return new_image
-
-
     def paint(self,
               painter,
               paint_area,
