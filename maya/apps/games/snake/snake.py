@@ -1,15 +1,15 @@
 import random
+import os
+import json
 
 import PySide2.QtCore as qc
 import PySide2.QtGui as qg
 import PySide2.QtWidgets as qw
 
-from majic_tools.sys.utils.names import intToAlpha
+from majic_tools.sys.utils.text import intToAlpha
 
-from . import game; reload(game)
-from majic_tools.maya.apps.games.snake import images; reload(images)
-from majic_tools.maya.apps.games.snake import font; reload(font)
-from .utils import ALIGN_LEFT, ALIGN_RIGHT, ALIGN_V_CENTER, ALIGN_H_CENTER, ALIGN_TOP, ALIGN_BOTTOM
+from majic_tools.maya.apps.games.snake import game, images, font
+from .utils import ALIGN_LEFT, ALIGN_V_CENTER, ALIGN_H_CENTER
 
 # ------------------------------------------------------------------------------------------------ #
 
@@ -71,13 +71,39 @@ class SnakeData(game.GameData):
 
     # high scores
     #
-    scores = [(intToAlpha(i, capital=True) * 3, 100 - (i * 10)) for i in range(10)]
+    scores = [('---', 0) for i in range(10)]
     new_high_score = None
+
+    score_filepath = 'D:\snake_high_scores.json'
+
 
     @staticmethod
     def isHighScore(score):
         """Checks if given score is higher than the lowest recorded score."""
         return score > min([score for _, score in SnakeData.scores])
+
+
+    @staticmethod
+    def saveScores():
+        with open(SnakeData.score_filepath, 'w') as f:
+            json.dump(SnakeData.scores, f, sort_keys=True, indent=2, separators=(',', ': '))
+
+
+    @staticmethod
+    def loadScores():
+        if not os.path.exists(SnakeData.score_filepath):
+            print "Snake II: Failed to load High Scores."
+            return
+
+        try:
+            with open(SnakeData.score_filepath, 'r') as f:
+                json_data = json.load(f)
+        except Exception as e:
+            print e
+            print "Snake II: Failed to load High Scores."
+            return
+
+        SnakeData.scores = json_data
 
 # ------------------------------------------------------------------------------------------------ #
 
@@ -112,11 +138,7 @@ class Snake(game.Game):
         menu_items = [('New Game', menu_to_arena),
                       ('Level', menu_to_level),
                       ('High Scores', menu_to_scores),
-                      ('Mode', menu_to_level),
-                      ('Test 1', menu_to_level),
-                      ('Test 2', menu_to_level),
-                      ('Test 3', menu_to_level),
-                      ('Test 4', menu_to_level)]
+                      ('Mode', menu_to_level)]
         main_menu.initialize(menu_items)
 
         # setup level menu
@@ -148,7 +170,6 @@ def paintPixel(painter, x, y):
     :param painter: QPainter object to draw with
     :param int x: real x position to draw the pixel
     :param int y: real y position to draw the pixel
-    :param int pixel_width: how many real pixels wide is the game pixel
     """
 
     x = x * (SnakeData.pixel_width + 2)
@@ -1153,6 +1174,7 @@ class HighScores(ScrollArea):
     def __init__(self, data):
         super(HighScores, self).__init__(data, 'High Scores')
 
+        self.data.loadScores()
         self.initialize()
 
         self._edit_mode = False
@@ -1177,22 +1199,44 @@ class HighScores(ScrollArea):
 
 
     def select(self, selected_item_index):
+        """
+        Normally this would select the item at the given index, but in this case it triggers a
+        return to the main menu.
+
+        :param int selected_item_index: the index of the item selected
+
+        :return:
+        """
         """Returns to main menu."""
         self.switch(0)
 
 
     def start(self):
+        """
+        Triggered on start up of high score screen. If entered from the main menu, no new
+        score is stored, so nothing happens. If entered from the arena, a new score is
+        stored, in which case this function checks if the score is high enough to be on the board.
+        If so it enters edit mode to allow the player to enter a name.
+
+        :return:
+        """
         super(ScrollArea, self).start()
 
+        # if no new high score, return
+        #
         if not self.data.new_high_score:
             return
 
+        # test if new high score should be in high score list
+        #
         position = -1
         for i, (_, score) in enumerate(self.data.scores):
             if self.data.new_high_score > score:
                 position = i
                 break
 
+        # if new high score is lower than lowest high score, return
+        #
         if position == -1:
             return
 
@@ -1206,10 +1250,14 @@ class HighScores(ScrollArea):
         self.data.scores.insert(position, ('---', self.data.new_high_score))
         self.data.scores = self.data.scores[:-1]
 
+        # shift scores and names to match high score list
+        #
         for i, (name, score) in enumerate(self.data.scores):
             self.items[i].score = score
             self.items[i].name = name
 
+        # reset high scores
+        #
         self.data.new_high_score = None
 
         # start edit mode
@@ -1219,7 +1267,9 @@ class HighScores(ScrollArea):
 
 
     def keyPressEvent(self, event):
-        """ Handles scrolling and selection of menu items.
+        """
+        Handles scrolling and selection of menu items. In edit mode, also handles scrolling
+        letter selection.
 
         :param QEvent event: key press event
         :return:
@@ -1239,8 +1289,15 @@ class HighScores(ScrollArea):
 
         super(HighScores, self).keyPressEvent(event)
 
+
     @qc.Slot()
     def _toggleEdit(self):
+        """
+        Toggles the edit paint attribute. If False the name text is not drawn. Used to make
+        the text flash on and off.
+
+        :return:
+        """
         if not self._edit_item:
             return
 
@@ -1249,6 +1306,12 @@ class HighScores(ScrollArea):
 
 
     def start_edit(self):
+        """
+        Begins edit mode. Starts the name text flickering animation timer, sets the edit
+        data to default, and updates the name image.
+
+        :return:
+        """
         self._edit_mode = True
         self._edit_timer.start(300)
 
@@ -1259,6 +1322,13 @@ class HighScores(ScrollArea):
 
 
     def scroll_edit(self, scroll):
+        """
+        Scrolls through the letter selection. Adds or subtracts from the current letter value.
+        Wraps A-Z.
+
+        :param scroll: plus or minus 1 scroll value.
+        :return:
+        """
         self._edit_indices[self._edit_index] += scroll
 
         current_value = self._edit_indices[self._edit_index]
@@ -1271,6 +1341,11 @@ class HighScores(ScrollArea):
 
 
     def next_edit(self):
+        """
+        Move to the next letter to edit.
+
+        :return:
+        """
         self._edit_index += 1
         if self._edit_index == 3:
             self.end_edit()
@@ -1281,21 +1356,40 @@ class HighScores(ScrollArea):
 
 
     def end_edit(self):
+        """
+        Finish letter editing. Stops edit animation, stores the new name and saves the high score
+        data to disk.
+
+        :return:
+        """
+        # store new name and score
+        #
         self.data.scores[self.selected_item_index] = (self._edit_item.name, self._edit_item.score)
 
+        # reset edit variables
+        #
         self._edit_item._edit_paint = False
         self._edit_item = None
         self._edit_mode = False
         self._edit_timer.stop()
 
+        # save scores to disk
+        #
+        SnakeData.saveScores()
+
 
     def _updateName(self):
+        """
+        Updates the name image based on the current edit.
+
+        :return:
+        """
         name = ''
         for i in self._edit_indices:
             if i is None:
                 name += '-'
             else:
-                name += intToAlpha(i, capital=True)
+                name += intToAlpha(i, upper=True)
 
         self._edit_item.name = name
         self.repaint()
@@ -1358,19 +1452,41 @@ class HighScoreItem(object):
 
     @positions.setter
     def position(self, position):
+        """
+        Set the position (1st, 2nd, 3rd etc) of the high score item. Creates the required image.
+
+        :param int position: position value (1 - 10)
+
+        :return:
+        """
         self._position = min(max(0, int(position)), 10)
         self.images[0] = font.small_font.getImage(HighScoreItem.score_positions[self.position])
 
 
     def paint(self, painter, paint_area, invert=False):
+        """
+        Paints on row of the high score item. Position -> Score -> Name.
+
+        :param QPainter painter: QPainter object to paint with
+        :param list paint_area: the area to paint in (x, y, width, height)
+        :param bool invert: if true pixels are inverted
+
+        :return:
+        """
+        # calculate column widths and sub paint area
+        #
         column_width = int(paint_area[2] / 3.0)
         sub_paint_area = [paint_area[0], paint_area[1], column_width, paint_area[3]]
 
         for i, image in enumerate(self.images):
+            # don't paint name for animated flickering
+            #
             if i == 2 and self._edit_paint:
                 HighScoreItem.blank_image.paint(painter, sub_paint_area, invert, paintPixel)
                 continue
 
+            # paint text
+            #
             image.paint(painter, sub_paint_area, invert, paintPixel)
             sub_paint_area[0] += column_width
 
@@ -1378,7 +1494,7 @@ class HighScoreItem(object):
 
 ui = None
 
-def create():
+def run():
     global ui
 
     if not ui:
@@ -1387,27 +1503,10 @@ def create():
     ui.show()
     
 
-
-def delete():
+def end():
     global ui
     
     if ui:
         del ui
     
     ui = None
-
-
-def draw(image):
-    image_str = []
-    for line in image.lines:
-        check = 1
-        line_str = []
-        for _ in range(image.width):
-            if line & check:
-                line_str.append('#')
-            else:
-                line_str.append(' ')
-            check = check << 1
-        image_str.append(''.join(line_str)[::-1])
-    print '\n'.join(image_str)
-

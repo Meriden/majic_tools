@@ -5,6 +5,7 @@ import PySide2.QtWidgets as qw
 
 class GameData(dict):
     title = 'GAME'
+    pause = False
 
     width = 500
     height = 500
@@ -35,6 +36,8 @@ class Game(qw.QDialog):
 
         self.widget_stack = qw.QStackedWidget()
         self.layout().addWidget(self.widget_stack)
+
+        self.installEventFilter(self)
 
         # level information
         #
@@ -110,9 +113,23 @@ class Game(qw.QDialog):
     def keyPressEvent(self, event):
         """
         Feed key press events to current widget. Otherwise signal goes to main window and is lost.
+        Feed key press events to current widget. Otherwise signal goes to main window and is lost.
         """
         current_widget = self.widget_stack.currentWidget()
         return current_widget.keyPressEvent(event)
+
+
+    def focusOutEvent(self, event):
+        print 'focus out'
+        super(Game, self).focusOutEvent(event)
+
+
+    def eventFilter(self, object, event):
+        if event.type() == qc.QEvent.WindowDeactivate:
+            self.data.pause = True
+        elif event.type() == qc.QEvent.WindowActivate:
+            self.data.pause = False
+        return False
 
 # ------------------------------------------------------------------------------------------------ #
 
